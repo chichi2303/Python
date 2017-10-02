@@ -1,0 +1,352 @@
+import os
+from datetime import datetime
+import re
+import tkinter
+from tkinter import *
+from tkinter.filedialog import askopenfilename
+
+# constant index for CPU metrics in a tuple
+CPU_USER_IDX = 1
+CPU_NICE_IDX = 2
+CPU_SYSTEM_IDX = 3
+CPU_IOWAIT_IDX = 4
+CPU_IDLE_IDX = 5
+
+
+class CpuStats:
+   '''class for object to hold CPU statistics of a host'''
+
+   def __init__(self):
+       '''create object with empty list to hold the statistics'''
+       # the list contains a tuple of timestamp and all CPU metrics
+       self.stats = []
+       self.sorted = True
+
+   def __sort(self):
+       '''internal method to sort the data points by timestamp'''
+       if not self.sorted:
+           self.stats.sort(key=lambda rec: rec[0])
+           self.sorted = True
+
+   def add(self, timestamp, user, nice, system, iowait, idle):
+       '''Insert a data point into the statistics list. No check for duplication.
+       It's up to other methods logic to handle duplicate data points'''
+       self.stats.append((timestamp, user, nice, system, iowait, idle))
+       self.sorted = False
+
+   def summarize(self, rawData, interval):
+       '''summarize the data points according to the specified interval length'''
+       sumData = []  # hold the list to be returned
+       prevDatetime = None  # previous timestamp
+       count = 0
+
+       for rawRec in rawData:
+           currDatetime = datetime(rawRec[0].year, rawRec[0].month, rawRec[0].day, rawRec[0].hour)
+           if currDatetime != prevDatetime:
+               # Start a new group
+               sumData.append((currDatetime, rawRec[1]) + rawRec[2:])
+               prevDatetime = currDatetime
+               count = 1
+           else:
+               # Update the last record in sumData
+               lastRec = sumData.pop()
+               updatedRec = [currDatetime] + [(rawRec[i] + count * lastRec[i]) / (count + 1) for i in
+                                              range(1, len(rawRec))]
+               sumData.append(tuple(updatedRec))
+               count += 1
+
+       return sumData
+
+   def getData(self, metricIndex=0, sumInterval=0, start=datetime(2000, 1, 1), end=datetime(2100, 1, 1)):
+       '''returns one metric or all metrics (metricIndex ==0) raw data in a list within the request interval'''
+       self.__sort()
+
+       if metricIndex == 0:
+           dataList = [rec for rec in self.stats if rec[0] > start and rec[0] < end]
+       else:
+           dataList = [(rec[0], rec[metricIndex]) for rec in self.stats if rec[0] > start and rec[0] < end]
+       if sumInterval == 0:
+           return dataList
+       else:
+           return self.summarize(dataList, sumInterval)
+
+
+class SarData:
+   '''class for object to hold and process the sar data'''
+   # regular expression pattern for CPU record in sar data file
+   CPU_REC_PAT = '\d{2}:\d{2}:\d{2} .* +all(\\s+[\\d\\.]+){6}'
+   HEADER_HOST_PAT = '\((.+)\)'
+   HEADER_DATE_PAT = '\d{2}/\d{2}/\d{4}'
+   DATETIME_STR_FMT = '%m/%d/%Y %I:%M:%S %p'
+   # compile the re pattern once, and applies to each line
+   cpu_rec_re = re.compile(CPU_REC_PAT)
+   header_re = re.compile(HEADER_HOST_PAT)
+   date_re = re.compile(HEADER_DATE_PAT)
+
+   def __init__(self, filename):
+       '''constructor creates a SarVis object, and populate the data from the given input file'''
+       self.hostName = ''
+       self.cpuStats = CpuStats()
+       dateSte = ''
+
+       try:
+           dataFile = open(filename, 'r')
+       except IOError:
+           print("Not able to read the input file ", filename)
+           raise
+
+       for line in dataFile:
+           try:
+               self.hostName = self.header_re.search(line).group(1)
+               dateStr = self.date_re.search(line).group(0)
+           except AttributeError:
+               pass  # do nothing for unmatched string
+           else:
+               continue
+
+           if re.match(self.CPU_REC_PAT, line):
+               self.__processCpu(dateStr, line)
+
+   def __processCpu(self, dateStr, line):
+       '''populate the CPU statistics object'''
+       fields = line[:-1].split()
+
+       # construct the datetime object
+       tsStr = dateStr + ' ' + fields[0] + ' ' + fields[1]
+       ts = datetime.strptime(tsStr, self.DATETIME_STR_FMT)
+
+       # insert the data point to statistics object
+       self.cpuStats.add(ts, float(fields[3]), float(fields[4]), float(fields[5]), float(fields[6]), float(fields[8]))
+
+   def getRawCpuStats(self, metricIndex=0):
+       '''returns the CPU statistics data in a list'''
+       return self.cpuStats.getData(metricIndex)
+
+   def getSummarizedCpuStats(self, metricIndex=0, interval=60):
+       '''returns the CPU statistics data in a list summarized at specified interval in minutes'''
+       return self.cpuStats.getData(metricIndex, interval)
+
+
+def OpenFile():
+    name = askopenfilename(filetypes =(("Text File", "*.txt"),("All Files","*.*")),
+                           title = "Choose a file."
+                           )
+    name = os.path.basename(name)
+    return name
+    name.close()
+      
+def askToOpen():
+       open_file = Tk()
+       menu = Menu(open_file)
+       open_file.config(menu=menu)
+       filemenu = Menu(menu)
+       menu.add_cascade(label="File", menu=filemenu)
+       filemenu.add_command(label="Open", command=OpenFile)
+       filemenu.add_separator()
+       filemenu.add_command(label="Exit", command=open_file.quit)
+       open_file.mainloop()
+       
+class CPUmin(): 
+
+   def drawChart(self, list_user, list_nice, list_system, list_iowait, list_steal):
+       root = Tk()
+       root.title ('CPU Utilization(5-Minute Interval)')
+       c = Canvas(root, width=1000, height=600, bg ='white')
+       c.create_text (1000*0.5, 600 *0.05, text='CPU Ultilization(5-minute interval)',fill='black', font = ('12'))
+
+       #draw y-axis 
+       x_base, y_base, distance = 60, 50, 50     
+       store_items = [100,90,80,70,60,50,40,30,20,10,0]
+       for i, word in enumerate(store_items):
+          c.create_text((x_base, y_base + i * distance), text=word, anchor=W, fill='black')
+
+       #draw x-axis  
+       t_list = ['00:15:01','00:30:02','00:45:01','01:00:01','01:15:01','01:30:01','01:45:01','02:00:01','02:15:01','02:30:01'
+               ,'02:45:01','03:00:01','03:15:01','03:30:01','03:45:01','04:00:01','04:15:01','04:30:01','04:45:01',
+               '05:00:02','05:15:01','05:30:02','05:45:02','06:00:02','06:30:01','06:45:01','07:00:01','07:15:02',
+               '07:45:01','08:00:01']
+       x_base_x, y_base_x, distance_x = 103, 600, 26
+
+       for j, word in enumerate (t_list):          
+          c.create_text((x_base_x + j * distance_x, y_base_x ), text=word, anchor=W, angle=90, fill='black')
+          
+       #Create legends
+       c.create_rectangle (890,300, 900,310, fill='dark blue')
+       c.create_text (915,305, text = 'idle', fill ='black')
+
+       c.create_rectangle (890,325, 900,335, fill='dark green')
+       c.create_text (920,330, text = 'iowait', fill ='black')      
+
+       c.create_rectangle (890,350, 900,360, fill='yellow')
+       c.create_text (920,355, text = 'system', fill ='black')
+
+       c.create_rectangle (890,375, 900,385, fill='blue')
+       c.create_text (915,380, text = 'nice', fill ='black')
+
+       c.create_rectangle (890,400, 900,410, fill='sea green')
+       c.create_text (915,405, text = 'user', fill ='black')          
+          
+          
+       lower_y_points =  [0] * len(list_user);
+       points_user, lower_y_points = self.create_points(lower_y_points, list_user)
+       points_nice, lower_y_points = self.create_points(lower_y_points, list_nice)
+       points_system, lower_y_points = self.create_points(lower_y_points, list_system)
+       points_iowait, lower_y_points = self.create_points(lower_y_points, list_iowait)
+       points_steal, lower_y_points = self.create_points(lower_y_points, list_steal)
+
+
+       end_y = 100+8*95
+       c.create_polygon([100,550,100, 50, end_y, 50, end_y, 550], outline='dark blue', fill='dark blue', width=1)
+
+       c.create_polygon(points_iowait, outline='dark green', fill='dark green', width=1)
+       c.create_polygon(points_system, outline='yellow', fill='yellow', width=1)
+       c.create_polygon(points_nice, outline='blue', fill='blue', width=1)
+       c.create_polygon(points_user, outline='sea green',  fill='sea green', width=1)
+
+       c.pack()
+       root.mainloop()
+      
+   def create_points(self, lower_points, list):
+       points = []
+       x_start = 100
+       y_start = 550
+       x = x_start
+       step = 8
+       height_mult = 5
+       
+
+       points.append(x_start)
+       points.append(y_start)
+       new_lower_points = []
+       idx =0
+       for val in list:
+          new_height = height_mult*val[1]+lower_points[idx]
+          y = y_start- new_height
+          new_lower_points.append(new_height)
+          points.append(x)
+          points.append(y)
+          x+=step
+          idx+=1
+       points.append(x-step)
+       points.append(y_start)
+       return points, new_lower_points
+
+class CPUhour():
+   def drawBar(self, bar_user, bar_nice, bar_system, bar_iowait, bar_steal):
+       root = Tk()
+       root.title ('CPU Utilization(Hourly Summary)')
+       c = Canvas(root, width=1000, height=600, bg ='white')
+       #Title
+       c.create_text (1000*0.5, 600 *0.05, text='CPU Ultilization(hourly summary)',fill='black', font = ('12'))
+
+       #Create y-axis
+       x_base, y_base, distance = 120, 102, 40   
+       store_items = [100,90,80,70,60,50,40,30,20,10,0]
+       for i, word in enumerate(store_items):
+          c.create_text((x_base, y_base + i * distance), text=word, anchor=W, fill='black')
+       
+       #Create line
+       c.create_line (1000*.15, 600 *0.835, 1000* 0.8, 600*0.835, fill = 'grey')
+       c.create_line (1000*.15, 600 *0.77, 1000* 0.8, 600*0.77, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.7, 1000* 0.8, 600*0.7, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.635, 1000* 0.8, 600*0.635, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.57, 1000* 0.8, 600*0.57, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.499, 1000* 0.8, 600*0.499, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.4356, 1000* 0.8, 600*0.4356, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.373, 1000* 0.8, 600*0.373, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.305, 1000* 0.8, 600*0.305, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.24, 1000* 0.8, 600*0.24, fill = 'grey')  
+       c.create_line (1000*.15, 600 *0.168, 1000* 0.8, 600*0.168, fill = 'grey')
+
+       #Create legends
+       c.create_rectangle (890,325, 900,335, fill='dark green')
+       c.create_text (920,330, text = 'iowait', fill ='black')      
+
+       c.create_rectangle (890,350, 900,360, fill='yellow')
+       c.create_text (920,355, text = 'system', fill ='black')
+
+       c.create_rectangle (890,375, 900,385, fill='blue')
+       c.create_text (915,380, text = 'nice', fill ='black')
+
+       c.create_rectangle (890,400, 900,410, fill='green')
+       c.create_text (915,405, text = 'user', fill ='black')
+
+       dis = 0.02
+       distance = 100
+       pading_height = 500
+       end_pad_rectange = [0] * len(bar_user)
+       ratio_multiple = 4.0
+       distance_margin = 10 * ratio_multiple
+       width_rectangle = 7.5 * ratio_multiple
+       x_base, y_base, distance_b = 180, 520, 70
+       # draw rectange bar_user and create x-axis
+       for idx, val in enumerate(bar_user):
+           #Create x-axis   
+           c.create_text((x_base + idx * distance_b, y_base ), text=idx, anchor=W, fill='black')
+           
+           x = (idx + 1) * (width_rectangle + distance_margin) + distance 
+           x1 = x + width_rectangle;
+
+           #bar_user
+           y_bar_user_start = pading_height
+           y_bar_user_end = pading_height - (bar_user[idx][1] * ratio_multiple)
+
+           #bar nice
+           y_bar_nice_start = y_bar_user_end
+           y_bar_nice_end = y_bar_user_end - (bar_nice[idx][1] * ratio_multiple)
+           
+           #bar_system
+           y_bar_system_start = y_bar_nice_end
+           y_bar_system_end = y_bar_nice_end - (bar_system[idx][1] * ratio_multiple)
+
+           #bar iowait
+           y_bar_iowait_start = y_bar_system_end
+           y_bar_iowait_end = y_bar_system_end - (bar_iowait[idx][1] * ratio_multiple)
+           
+
+
+           c.create_rectangle(x , y_bar_user_start, x1, y_bar_user_end, outline='green', fill='green', width=1)
+           c.create_rectangle(x, y_bar_system_start, x1, y_bar_system_end, outline='yellow', fill='yellow', width=1)
+           c.create_rectangle(x, y_bar_nice_start, x1, y_bar_nice_end, outline='blue', fill='blue', width=1)
+           c.create_rectangle(x, y_bar_iowait_start, x1, y_bar_iowait_end, outline='dark green', fill='dark green', width=1)
+
+
+       c.pack()
+       root.mainloop()
+     
+class Menu ():
+   def __init__(self):
+      self.menu=Tk(className='                                                     CPU Ulilization')
+      self.min_button=Button(self.menu,text='5-Minute Interval',
+                                  width=30,compound='center',command=self.Button1).grid(row=1,column=0)
+      self.hour_button=Button(self.menu,text='Hourly Summary',
+                                  width=30,compound='center',command=self.Button2).grid(row=1,column=1)
+      self.menu.mainloop()
+   
+   def Button1 (self):
+      sar_data = SarData('sar_cpu.txt')
+      list_user = sar_data.getRawCpuStats(1)
+      list_nice = sar_data.getRawCpuStats(2)
+      list_system = sar_data.getRawCpuStats(3)
+      list_iowait = sar_data.getRawCpuStats(4)
+      list_steal = sar_data.getRawCpuStats(5)
+      m = CPUmin()
+      m.drawChart(list_user, list_nice, list_system, list_iowait, list_steal)
+
+   def Button2 (self):
+      sar_data = SarData('sar_cpu.txt')
+      bar_user = sar_data.getSummarizedCpuStats(1)
+      bar_nice = sar_data.getSummarizedCpuStats(2)
+      bar_system = sar_data.getSummarizedCpuStats(3)
+      bar_iowait = sar_data.getSummarizedCpuStats(4)
+      bar_steal = sar_data.getSummarizedCpuStats(5)
+      n = CPUhour()
+      n.drawBar(bar_user, bar_nice, bar_system, bar_iowait, bar_steal)
+      
+
+def main():
+   menu = Menu ()
+
+
+if __name__ == "__main__":
+   main()
